@@ -1,0 +1,26 @@
+#!/bin/bash
+# Wait for opflex infra interface to get an IP
+
+infra_if={{ opflex_if }}.{{ aci_infra_vlan }}
+
+: ${TIMEOUT:=120}
+for ix in {1..$TIMEOUT}; do
+  infra_ip=$(ip addr show dev $infra_if | awk '/inet / {print $2}')
+  if [ -z "$infra_ip" ] then;
+    sleep 1
+    continue
+  fi
+
+  ll_ip=$(ip addr show dev $infra_if | awk '/inet / {print $2}' | grep "^169")
+  if [ -z "$ll_ip" ] then;
+    echo "Opflex agent IP: $infra_ip"
+    exit 0
+  fi
+
+  echo "Opflex agent IP: $infra_ip"
+  exit 1
+done
+
+echo "Failed to get IP after $TIMEOUT sec"
+exit 1
+

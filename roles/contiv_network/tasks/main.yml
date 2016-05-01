@@ -101,3 +101,6 @@
 
 - include: aci_tasks.yml
   when: (run_as == "master") and (contiv_network_mode == "aci")
+
+- include: opflex.yml
+  when: (ansible_os_family == "RedHat") and (contiv_network_mode == "aci_opflex")

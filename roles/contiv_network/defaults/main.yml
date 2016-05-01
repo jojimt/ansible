@@ -28,3 +28,16 @@ contivctl_dest_file: "/tmp/{{ contivctl_tar_file }}"
 
 apic_epg_bridge_domain: "not_specified"
 apic_contracts_unrestricted_mode: "no"
+
+# Used for ACI/opFlex integration. Normally, you don't need to change these.
+contiv_vmm_name: "comp/prov-OpenStack/ctrlr-[openstack]-openstack/sw-InsiemeLSOid"
+opflex_discovery_ip: "10.0.0.30"
+opflex_ovs_bridge_name: "br0"
+aci_infra_vlan: 4093
+aci_ftep_ip: "10.0.0.32"
+opflex_ep_sources: "/var/lib/opflex-agent-ovs/endpoints"
+opflex_dhcp_timeout: 120
+
+# Uplink interface for opFlex. Defaults to netplugin_if. You can override it if you need to.
+opflex_if: {{ netplugin_if }}
+opflex_agent_if: {{ opflex_if }}.{{ aci_infra_vlan }}

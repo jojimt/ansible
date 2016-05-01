@@ -1,0 +1,118 @@
+{
+    "opflex": {
+	// The globally unique policy domain for this agent.
+	"domain": "{{ contiv_vmm_name }}",
+
+	// The unique name in the policy domain for this agent.
+	"name": "{{ansible_hostname}}-contiv",
+
+	// a list of peers to connect to, by hostname and port.  One
+	// peer, or an anycast pseudo-peer, is sufficient to bootstrap 
+	// the connection without needing an exhaustive list of all
+	// peers.
+	"peers": [
+            {"hostname": "{{ opflex_discovery_ip }}", "port": 8009}
+	],
+
+	"ssl": {
+            // SSL mode.  Possible values:
+            // disabled: communicate without encryption
+            // encrypted: encrypt but do not verify peers
+            // secure: encrypt and verify peer certificates
+            "mode": "encrypted",
+
+            // The path to a directory containing trusted certificate
+            // authority public certificates, or a file containing a
+            // specific CA certificate.
+            "ca-store": "/etc/ssl/certs/"
+	}
+    },
+
+    // Endpoint sources provide metadata about local endpoints
+    "endpoint-sources": {
+        // Filesystem path to monitor for endpoint information
+        "filesystem": ["/var/lib/opflex-agent-ovs/endpoints"]
+    },
+
+    // Service sources provide metadata about services that can
+    // provide functionality for local endpoints
+    "service-sources": {
+        // Filesystem path to monitor for service information
+        "filesystem": ["{{ opflex_ep_sources }}"]
+    },
+
+    // Renderers enforce policy obtained via OpFlex.
+    "renderers": {
+	// Stitched-mode renderer for interoperating with a
+	// hardware fabric such as ACI
+	"stitched-mode": {
+            "ovs-bridge-name": "{{ opflex_ovs_bridge_name }}",
+	    
+            // Set encapsulation type.  Must set either vxlan or vlan.
+            "encap": {
+		// Encapsulate traffic with VXLAN.
+		"vxlan" : {
+                    // The name of the tunnel interface in OVS
+                    "encap-iface": "{{ opflex_ovs_bridge_name }}_vxlan0",
+		    
+                    // The name of the interface whose IP should be used
+                    // as the source IP in encapsulated traffic.
+                    "uplink-iface": "enp6s0.{{ aci_infra_vlan }}",
+		    
+                    // The vlan tag, if any, used on the uplink interface.
+                    // Set to zero or omit if the uplink is untagged.
+                    "uplink-vlan": {{ aci_infra_vlan }},
+
+                    // The IP address used for the destination IP in
+                    // the encapsulated traffic.  This should be an
+                    // anycast IP address understood by the upstream
+                    // stitched-mode fabric.
+                    "remote-ip": "{{ aci_ftep_ip }}"
+		}
+            },
+            // Configure forwarding policy
+            "forwarding": {
+		// Configure the virtual distributed router
+		"virtual-router": {
+                    // Enable virtual distributed router.  Set to true
+                    // to enable or false to disable.  Default true.
+                    "enabled": true,
+		    
+                    // Override MAC address for virtual router.
+                    // Default is "00:22:bd:f8:19:ff"
+                    "mac": "00:22:bd:f8:19:ff",
+		    
+                    // Configure IPv6-related settings for the virtual
+                    // router
+                    "ipv6" : {
+			// Send router advertisement messages in
+			// response to router solicitation requests as
+			// well as unsolicited advertisements.  This
+			// is not required in stitched mode since the
+			// hardware router will send them.
+			"router-advertisement": false
+                    }
+		},
+		
+		// Configure virtual distributed DHCP server
+		"virtual-dhcp": {
+                    // Enable virtual distributed DHCP server.  Set to
+                    // true to enable or false to disable.  Default
+                    // true.
+                    "enabled": false,
+		    
+                    // Override MAC address for virtual dhcp server.
+                    // Default is "00:22:bd:f8:19:ff"
+                    "mac": "00:22:bd:f8:19:ff"
+		}
+            },
+
+        // Location to store cached IDs for managing flow state
+        "flowid-cache-dir": "/var/lib/opflex-agent-ovs/ids",
+        
+        // Location to write multicast groups for the mcast-daemon
+	// Default: do not write multicast groups to a file
+        "mcast-group-file": "/var/lib/opflex-agent-ovs/mcast/opflex-groups.json"
+	}
+    }
+}

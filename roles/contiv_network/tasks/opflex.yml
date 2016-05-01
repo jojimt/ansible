@@ -1,0 +1,122 @@
+# Tasks for opFlex set up
+
+- name: opFlex | install libuv, openvswitch-gbp-lib, libopflex, libmodelgbp, agent-ovs
+  yum: name={{ item }}
+  with_items:
+    - https://cisco.box.com/shared/static/d168o2n8wewje6c6k94jtvjcf9zdbh4f.rpm
+    - https://cisco.box.com/shared/static/asx9mvj1cvwxtaeq8ckwyo63c9hq93vb.rpm
+    - https://cisco.box.com/shared/static/wrzfrar12ri84191dilew6fbyjnmjw5m.rpm
+    - https://cisco.box.com/shared/static/e9lk46emuqwrj8w7pq293n69jo4jexwq.rpm
+    - https://cisco.box.com/shared/static/bv69bpk08er0m0yfxzp0i24orluw4imq.rpm
+
+- name: opFlex | ensure opflex-agent-ovs and opflex_ep_sources exist
+  file: path={{ item }} recurse=yes state=directory
+  with_items:
+    - /etc/opflex-agent-ovs
+    - {{ opflex_ep_sources }}
+
+- name: opFlex | install agent config file
+  template: src=opflex-agent-ovs.j2 dest=/etc/opflex-agent-ovs/opflex-agent-ovs
+
+- name: opFlex | Create a NetworkManager connection for uplink
+  shell: nmcli c add type ethernet ifname {{ opflex_if }}
+
+- name: opFlex | Configure uplink
+  shell: nmcli connection mod ethernet-{{ opflex_if }} connection.autoconnect yes 
+                              ipv4.method link-local 
+                              ipv6.method ignore 
+                              802-3-ethernet.mtu 9000 
+                              ipv4.routes '224.0.0.0/4 0.0.0.0 2000'
+
+- name: opFlex | Bring up uplink
+  shell: nmcli connection up ethernet-{{ opflex_if }}
+
+- name: opFlex | Set up infra-vlan interface
+  shell: nmcli connection add type vlan ifname {{ opflex_if }}.{{ aci_infra_vlan }}
+               dev {{ opflex_if }} id {{ aci_infra_vlan }}
+
+- name: opFlex | Configure infra-vlan interface
+  shell: nmcli connection mod vlan-{{ opflex_if }}.{{ aci_infra_vlan }} \
+               ethernet.mtu 1600 ipv4.routes '224.0.0.0/4 0.0.0.0 1000'
+
+- name: opFlex | Setup DHCP for infra-vlan interface
+  lineinfile:
+    dest=/etc/dhcp/dhclient-{{ opflex_if }}.{{ aci_infra_vlan }}.conf
+    regexp={{ item.regexp }}
+    line={{ item.line }}
+    state=present
+    create=yes
+    with_items:
+      - { regexp: '^send.*', line: "send dhcp-client-identifier 01:{{ 'ansible_' + opflex_if.macaddress }};"
+      - { regexp: '^request.*', line: "request subnet-mask, domain-name, domain-name-servers, host-name;"
+
+- name: opFlex | Bring up infra-vlan interface
+  shell: nmcli connection up vlan-{{ opflex_if }}.{{ aci_infra_vlan }}
+
+#- name: opFlex | Install dhcp verify script
+#  template: src=opflex_dhcp_verify.j2 dest=/usr/bin/opflex_dhcp_verify.sh mode=0755
+
+#- name: opFlex | Verify infra DHCP
+#  command: /usr/bin/opflex_dhcp_verify.sh
+#  environment:
+#    TIMEOUT: "{{ opflex_dhcp_timeout }}"
+#  register: command_result
+#  failed_when: command_result.rc != 0
+
+- name: opFlex | Wait for infra DHCP
+  action: shell ip addr show dev {{ opflex_agent_if }}| awk '/inet / {print $2}' | grep "[0-9]"
+  register: dhcp_result
+  until: dhcp_result.rc == 0
+  retries: 12
+  delay: 10
+
+- name: opFlex | Fail if we got a link local IP
+  fail: msg="opFlex agent DHCP failed with link local IP"
+  when: "'^169.*' in dhcp_result.stdout"
+
+- name: opFlex | Enable openvswitch service
+  service: name=openvswitch enabled=yes  
+
+- name: opFlex | Link openvswitch service file
+  file: src=/usr/lib/systemd/system/openvswitch.service 
+        dest=/etc/systemd/system/multi-user.target.wants/openvswitch.service
+        state=link
+
+- name: opFlex | Start openvswitch service
+  service: name=openvswitch state=started  
+
+- name: opFlex | Create ovs bridge
+  shell: ovs-vsctl add-br {{ opflex_ovs_bridge_name }}
+
+- name: opFlex | Verify ovs bridge was created
+  shell: ovs-vsctl show | grep 'Bridge "{{ opflex_ovs_bridge_name }}"'
+  register: command_result
+  failed_when: command_result.rc != 0
+
+- name: opFlex | Configure tunnel interface
+  shell: ovs-vsctl add-port {{ opflex_ovs_bridge_name }} {{ opflex_ovs_bridge_name }}-vxlan0 --
+                   set Interface {{ opflex_ovs_bridge_name }}-vxlan0 type=vxlan
+                   options:remote_ip=flow options:key=flow options:dst_port=8472
+
+- name: opFlex | Verify ovs tunnel interface was created
+  shell: ovs-vsctl show | grep "Interface .*vxlan0"
+  register: command_result
+  failed_when: command_result.rc != 0
+
+- name: opFlex | Enable opflex agent service
+  service: name=agent-ovs enabled=yes  
+
+- name: opFlex | Link agent service file
+  file: src=/usr/lib/systemd/system/agent-ovs.service 
+        dest=/etc/systemd/system/multi-user.target.wants/agent-ovs.service
+        state=link
+
+- name: opFlex | Start agent service
+  service: name=agent-ovs state=started  
+
+- name: opFlex | Wait for opFlex connection for 180 sec max
+  action: shell netstat | grep 8009
+  register: result
+  until: result.stdout.find("ESTABLISHED") != -1
+  retries: 18
+  delay: 10

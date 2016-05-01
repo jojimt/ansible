@@ -1,0 +1,65 @@
+# Test connectivity after opflex is set up
+  - name: check dns container image
+    shell: docker inspect contiv/util-busybox
+    register: test_image_status
+    ignore_errors: yes
+
+  - name: opFlex-Test | Pull image for test
+    shell: docker pull contiv/util-busybox
+    when: test_image_status.rc != 0
+
+  - name: opFlex-Test | Launch a test container
+    shell: docker run --name opflex-test-bbox -itd contiv/util-busybox /bin/sh
+
+  - name: opFlex-Test | Install veth_create util
+    get_url:
+    validate_certs: False
+    url: https://cisco.box.com/shared/static/q13zczhd2194wtqh4ucksfk8jxbdd60v
+    dest: /usr/bin/veth_create
+    mode: 0755
+
+  - name: opFlex-Test | Get the test container's pid
+    shell: docker inspect --format '{{.State.Pid}}' opflex-test-bbox
+    register: pid_result
+
+  - name: opFlex-Test | Ceate a veth pair and move to test container
+    shell: veth_create -ifname veth666 -ovsport vport666 -netnspid {{ pid_result.stdout }}
+
+  - name: opFlex-Test | Get IP address of opflex agent
+    shell: ip addr show dev {{ opflex_agent_if }}| awk '/inet / {print $2}'
+    register: opflex_ip_res
+    set_fact: opflex_ip=opflex_ip_res.stdout
+
+  - set_fact: 
+    test_ip: {{ fabric_svi.split('.')[0] }}.{{ fabric_svi.split('.')[1] }}.{{ opflex_ip.split('.')[2] }}.{{ opflex_ip.split('.')[3] }}
+
+  - name: opFlex-Test | Set IP address for the test veth
+    shell: nsenter -t pid_result.stdout -n -F -- ip address add {{ test_ip }}/16 dev veth666
+
+  - name: opFlex-Test | Add test port to ovs bridge
+    shell: ovs-vsctl add-port {{ opflex_ovs_bridge_name }} vport666
+
+  - name: opFlex-Test | Get test veth's mac
+    shell: nsenter -t pid_result.stdout -n -F ip address show dev veth666 | awk '/ether/ {print $2}'
+    register: mac_result
+
+  - set_fact: 
+    test_mac: mac_result.stdout
+
+  - name: opFlex-Test | Generate a uuid for test ep
+    shell: uuidgen -r
+    register: uuid_res
+
+  - set_fact: 
+    test_uuid: uuid_res.stdout
+
+  - name: opFlex-Test | Create ep file for test ep
+    template: src=opflex_ep.j2 dest={{ opflex_ep_sources }}/{{ test_uuid }}.ep
+
+  - name: opFlex | Verify test EP can ping fabric
+    action: shell docker exec -it opflex-test-bbox ping {{ fabric_svi }} -c 3
+    register: ping_result
+    until: ping_result.rc == 0
+    retries: 18
+    delay: 10
+
