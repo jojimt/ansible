@@ -104,3 +104,6 @@
 
 - include: opflex.yml
   when: (ansible_os_family == "RedHat") and (contiv_network_mode == "aci_opflex")
+
+- include: opflex_test.yml
+  when: (ansible_os_family == "RedHat") and (contiv_network_mode == "aci_opflex")

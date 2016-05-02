@@ -1,5 +1,5 @@
 # Test connectivity after opflex is set up
-  - name: check dns container image
+  - name: check busybox container image
     shell: docker inspect contiv/util-busybox
     register: test_image_status
     ignore_errors: yes
@@ -8,18 +8,21 @@
     shell: docker pull contiv/util-busybox
     when: test_image_status.rc != 0
 
+  - name: check test container status
+    shell: sudo docker ps | grep opflex-test-bbox
+    register: test_container_status
+    ignore_errors: yes
+
   - name: opFlex-Test | Launch a test container
     shell: docker run --name opflex-test-bbox -itd contiv/util-busybox /bin/sh
+    when: test_container_status.rc != 0
 
   - name: opFlex-Test | Install veth_create util
     get_url:
-    validate_certs: False
-    url: https://cisco.box.com/shared/static/q13zczhd2194wtqh4ucksfk8jxbdd60v
-    dest: /usr/bin/veth_create
-    mode: 0755
+      url=https://cisco.box.com/shared/static/q13zczhd2194wtqh4ucksfk8jxbdd60v dest=/usr/bin/veth_create mode=0755 validate_certs=False
 
   - name: opFlex-Test | Get the test container's pid
-    shell: docker inspect --format '{{.State.Pid}}' opflex-test-bbox
+    shell: docker inspect --format '{{ '{{' }}.State.Pid{{ '}}' }}' opflex-test-bbox
     register: pid_result
 
   - name: opFlex-Test | Ceate a veth pair and move to test container
@@ -28,35 +31,61 @@
   - name: opFlex-Test | Get IP address of opflex agent
     shell: ip addr show dev {{ opflex_agent_if }}| awk '/inet / {print $2}'
     register: opflex_ip_res
-    set_fact: opflex_ip=opflex_ip_res.stdout
 
   - set_fact: 
-    test_ip: {{ fabric_svi.split('.')[0] }}.{{ fabric_svi.split('.')[1] }}.{{ opflex_ip.split('.')[2] }}.{{ opflex_ip.split('.')[3] }}
+      opflex_ip: "{{ opflex_ip_res.stdout.split('/')[0] }}"
+
+  - set_fact: 
+      opflex_ip_split: "{{ opflex_ip.split('.') }}"
+
+  - set_fact: 
+#    test_ip: "{{ fabric_svi }}".split('.')[0]."{{ fabric_svi }}".split('.')[1]."{{ opflex_ip }}".split('.')[2] ."{{ opflex_ip }}".split('.')[3]
+      test_ip0: "{{ fabric_svi.split('.')[0] }}"
+      test_ip1: "{{ fabric_svi.split('.')[1] }}"
+      test_ip2: "{{ opflex_ip_split[2] }}"
+      test_ip3: "{{ opflex_ip_split[3] }}"
+
+  - set_fact: 
+      test_ip: "{{ test_ip0 }}.{{ test_ip1 }}.{{ test_ip2 }}.{{ test_ip3 }}"
+
+  - debug:
+      var: test_ip
 
   - name: opFlex-Test | Set IP address for the test veth
-    shell: nsenter -t pid_result.stdout -n -F -- ip address add {{ test_ip }}/16 dev veth666
+    shell: nsenter -t {{ pid_result.stdout }} -n -F -- ip address add {{ test_ip }}/16 dev veth666
+    ignore_errors: yes
+
+  - name: opFlex-Test | Set test veth up
+    shell: nsenter -t {{ pid_result.stdout }} -n -F -- ip link set veth666 up
 
   - name: opFlex-Test | Add test port to ovs bridge
     shell: ovs-vsctl add-port {{ opflex_ovs_bridge_name }} vport666
+    ignore_errors: yes
 
   - name: opFlex-Test | Get test veth's mac
-    shell: nsenter -t pid_result.stdout -n -F ip address show dev veth666 | awk '/ether/ {print $2}'
+    shell: nsenter -t {{ pid_result.stdout }} -n -F ip address show dev veth666 | awk '/ether/ {print $2}'
     register: mac_result
 
   - set_fact: 
-    test_mac: mac_result.stdout
+      test_mac: "{{ mac_result.stdout }}"
+
+  - name: opflex-Test | Check if ep file exists
+    shell: ls /var/lib/opflex-agent-ovs/endpoints/ | grep ".*\.ep$"
+    register: ep_res
+    ignore_errors: yes
 
   - name: opFlex-Test | Generate a uuid for test ep
     shell: uuidgen -r
     register: uuid_res
 
   - set_fact: 
-    test_uuid: uuid_res.stdout
+      test_uuid: "{{ uuid_res.stdout }}"
 
   - name: opFlex-Test | Create ep file for test ep
     template: src=opflex_ep.j2 dest={{ opflex_ep_sources }}/{{ test_uuid }}.ep
+    when: ep_res.rc != 0
 
-  - name: opFlex | Verify test EP can ping fabric
+  - name: opFlex-Test | Verify test EP can ping fabric
     action: shell docker exec -it opflex-test-bbox ping {{ fabric_svi }} -c 3
     register: ping_result
     until: ping_result.rc == 0

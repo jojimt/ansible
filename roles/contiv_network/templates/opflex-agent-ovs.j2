@@ -53,7 +53,7 @@
 		// Encapsulate traffic with VXLAN.
 		"vxlan" : {
                     // The name of the tunnel interface in OVS
-                    "encap-iface": "{{ opflex_ovs_bridge_name }}_vxlan0",
+                    "encap-iface": "{{ opflex_ovs_bridge_name }}-vxlan0",
 		    
                     // The name of the interface whose IP should be used
                     // as the source IP in encapsulated traffic.

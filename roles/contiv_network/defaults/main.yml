@@ -39,5 +39,12 @@ opflex_ep_sources: "/var/lib/opflex-agent-ovs/endpoints"
 opflex_dhcp_timeout: 120
 
 # Uplink interface for opFlex. Defaults to netplugin_if. You can override it if you need to.
-opflex_if: {{ netplugin_if }}
-opflex_agent_if: {{ opflex_if }}.{{ aci_infra_vlan }}
+#opflex_if: {{ netplugin_if }}
+opflex_if: enp6s0
+opflex_agent_if: "{{ opflex_if }}.{{ aci_infra_vlan }}"
+#opflex_agent_if: enp6s0.4093
+fabric_svi: 33.3.3.254
+ContivOpflexTenant: ContivOpflex
+ContivAppProf: "Contiv-Prof1"
+ContivTestEPG: "Contiv-Opflex-EPG1"
+contiv_test_vport: vport666

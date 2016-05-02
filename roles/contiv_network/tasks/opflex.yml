@@ -1,7 +1,7 @@
 # Tasks for opFlex set up
 
 - name: opFlex | install libuv, openvswitch-gbp-lib, libopflex, libmodelgbp, agent-ovs
-  yum: name={{ item }}
+  yum: name={{ item }} state=present
   with_items:
     - https://cisco.box.com/shared/static/d168o2n8wewje6c6k94jtvjcf9zdbh4f.rpm
     - https://cisco.box.com/shared/static/asx9mvj1cvwxtaeq8ckwyo63c9hq93vb.rpm
@@ -13,10 +13,10 @@
   file: path={{ item }} recurse=yes state=directory
   with_items:
     - /etc/opflex-agent-ovs
-    - {{ opflex_ep_sources }}
+    - "{{ opflex_ep_sources }}"
 
 - name: opFlex | install agent config file
-  template: src=opflex-agent-ovs.j2 dest=/etc/opflex-agent-ovs/opflex-agent-ovs
+  template: src=opflex-agent-ovs.j2 dest=/etc/opflex-agent-ovs/opflex-agent-ovs.conf
 
 - name: opFlex | Create a NetworkManager connection for uplink
   shell: nmcli c add type ethernet ifname {{ opflex_if }}
@@ -46,9 +46,9 @@
     line={{ item.line }}
     state=present
     create=yes
-    with_items:
-      - { regexp: '^send.*', line: "send dhcp-client-identifier 01:{{ 'ansible_' + opflex_if.macaddress }};"
-      - { regexp: '^request.*', line: "request subnet-mask, domain-name, domain-name-servers, host-name;"
+  with_items:
+    - { regexp: '^send.*', line: "send dhcp-client-identifier 01:{{ hostvars[inventory_hostname]['ansible_' + opflex_if].macaddress }};"}
+    - { regexp: '^request.*', line: "request subnet-mask, domain-name, domain-name-servers, host-name;"}
 
 - name: opFlex | Bring up infra-vlan interface
   shell: nmcli connection up vlan-{{ opflex_if }}.{{ aci_infra_vlan }}
@@ -85,23 +85,33 @@
 - name: opFlex | Start openvswitch service
   service: name=openvswitch state=started  
 
+- name: opFlex | Verify ovs bridge exists
+  shell: ovs-vsctl show | grep 'Bridge "{{ opflex_ovs_bridge_name }}"'
+  register: ovs_result
+
 - name: opFlex | Create ovs bridge
   shell: ovs-vsctl add-br {{ opflex_ovs_bridge_name }}
+  when: ovs_result.rc != 0
 
 - name: opFlex | Verify ovs bridge was created
   shell: ovs-vsctl show | grep 'Bridge "{{ opflex_ovs_bridge_name }}"'
   register: command_result
   failed_when: command_result.rc != 0
 
+- name: opFlex | Verify ovs tunnel interface was created
+  shell: ovs-vsctl show | grep "Interface .*vxlan0"
+  register: tunnel_result
+
 - name: opFlex | Configure tunnel interface
   shell: ovs-vsctl add-port {{ opflex_ovs_bridge_name }} {{ opflex_ovs_bridge_name }}-vxlan0 --
                    set Interface {{ opflex_ovs_bridge_name }}-vxlan0 type=vxlan
                    options:remote_ip=flow options:key=flow options:dst_port=8472
+  when: tunnel_result.rc != 0
 
 - name: opFlex | Verify ovs tunnel interface was created
   shell: ovs-vsctl show | grep "Interface .*vxlan0"
-  register: command_result
-  failed_when: command_result.rc != 0
+  register: intf_result
+  failed_when: intf_result.rc != 0
 
 - name: opFlex | Enable opflex agent service
   service: name=agent-ovs enabled=yes  
