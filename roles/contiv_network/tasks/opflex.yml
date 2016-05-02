@@ -18,8 +18,13 @@
 - name: opFlex | install agent config file
   template: src=opflex-agent-ovs.j2 dest=/etc/opflex-agent-ovs/opflex-agent-ovs.conf
 
+- name: opFlex | Check if uplink interface connection exists
+  shell: nmcli -f connection.interface-name connection show ethernet-{{ opflex_if }}
+  register: uplink_res
+
 - name: opFlex | Create a NetworkManager connection for uplink
   shell: nmcli c add type ethernet ifname {{ opflex_if }}
+  when: uplink_res.rc != 0
 
 - name: opFlex | Configure uplink
   shell: nmcli connection mod ethernet-{{ opflex_if }} connection.autoconnect yes 
@@ -31,9 +36,14 @@
 - name: opFlex | Bring up uplink
   shell: nmcli connection up ethernet-{{ opflex_if }}
 
-- name: opFlex | Set up infra-vlan interface
+- name: opFlex | Check if infra-vlan interface exists
+  shell: nmcli -f connection.interface-name connection show vlan-{{ opflex_if }}.{{ aci_infra_vlan }}
+  register: infra_vlan_res
+
+- name: opFlex | Create infra-vlan interface
   shell: nmcli connection add type vlan ifname {{ opflex_if }}.{{ aci_infra_vlan }}
                dev {{ opflex_if }} id {{ aci_infra_vlan }}
+  when: infra_vlan_res.rc != 0
 
 - name: opFlex | Configure infra-vlan interface
   shell: nmcli connection mod vlan-{{ opflex_if }}.{{ aci_infra_vlan }} \
